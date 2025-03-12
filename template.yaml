@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  lucky-draw-app
+
+  Sample SAM Template for lucky-draw-app
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 30
+    CodeUri: lucky-draw/
+    Runtime: nodejs20.x
+    Architectures:
+    - x86_64
+    LoggingConfig:
+      LogFormat: JSON
+    Environment:
+      Variables:
+        USER_TABLE_NAME: !Ref UserTable
+        PRIZE_TABLE_NAME: !Ref PrizeTable
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: lucky-draw
+  Env:
+    Type: String
+    Default: dev
+
+Resources:
+  GetPrizesFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Env}-get-prizes
+      Handler: prize.getPrizesHandler
+      Events:
+        ApiEvent:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /prizes
+            Method: get
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+        - prize.ts
+
+  GetInventoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Env}-get-inventory
+      Handler: inventory.getInventoryHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PrizeTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /inventory
+            Method: get
+            Auth:
+              DefaultAuthorizer: CognitoAuthorizer
+              Authorizers:
+                CognitoAuthorizer:
+                  UserPoolArn: !GetAtt CognitoUserPool.Arn
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+        - inventory.ts
+
+  UserTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: !Sub ${ProjectName}-${Env}-user-table
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  PrizeTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: !Sub ${ProjectName}-${Env}-prize-table
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  PostConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Env}-post-confirmation
+      Handler: app.postConfirmationHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+        - app.ts
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${ProjectName}-${Env}-user-pool
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      LambdaConfig:
+        PostConfirmation: !GetAtt PostConfirmationFunction.Arn
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${ProjectName}-${Env}-user-pool-client
+      UserPoolId: !Ref CognitoUserPool
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  PrizeApi:
+    Description: API Gateway endpoint URL for Prod stage for Get Prizes function
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/prizes"
+  GetPrizesFunction:
+    Description: Get Prizes Lambda Function ARN
+    Value: !GetAtt GetPrizesFunction.Arn
+  GetPrizesFunctionIamRole:
+    Description: Implicit IAM Role created for Get Prizes function
+    Value: !GetAtt GetPrizesFunctionRole.Arn
