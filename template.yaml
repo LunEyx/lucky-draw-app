@@ -19,6 +19,7 @@ Globals:
       Variables:
         USER_TABLE_NAME: !Ref UserTable
         PRIZE_TABLE_NAME: !Ref PrizeTable
+        INVENTORY_TABLE_NAME: !Ref InventoryTable
 
 Parameters:
   ProjectName:
@@ -29,17 +30,58 @@ Parameters:
     Default: dev
 
 Resources:
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Sub ${Env}
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+
+  # Admin Functions
+  CreatePrizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Env}-create-prize
+      Handler: prize.createPrizeHandler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PrizeTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /prizes
+            Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+        - prize.ts
+
   GetPrizesFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
       FunctionName: !Sub ${ProjectName}-${Env}-get-prizes
       Handler: prize.getPrizesHandler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PrizeTable
       Events:
         ApiEvent:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
+            RestApiId: !Ref ApiGateway
             Path: /prizes
             Method: get
+            Auth:
+              Authorizer: NONE
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -57,17 +99,17 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref PrizeTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref InventoryTable
       Events:
         ApiEvent:
           Type: Api
           Properties:
+            RestApiId: !Ref ApiGateway
             Path: /inventory
             Method: get
             Auth:
-              DefaultAuthorizer: CognitoAuthorizer
-              Authorizers:
-                CognitoAuthorizer:
-                  UserPoolArn: !GetAtt CognitoUserPool.Arn
+              Authorizer: NONE
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -89,6 +131,14 @@ Resources:
     Type: AWS::Serverless::SimpleTable
     Properties:
       TableName: !Sub ${ProjectName}-${Env}-prize-table
+      PrimaryKey:
+        Name: id
+        Type: String
+
+  InventoryTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      TableName: !Sub ${ProjectName}-${Env}-inventory-table
       PrimaryKey:
         Name: id
         Type: String
@@ -136,12 +186,6 @@ Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  PrizeApi:
-    Description: API Gateway endpoint URL for Prod stage for Get Prizes function
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/prizes"
-  GetPrizesFunction:
-    Description: Get Prizes Lambda Function ARN
-    Value: !GetAtt GetPrizesFunction.Arn
-  GetPrizesFunctionIamRole:
-    Description: Implicit IAM Role created for Get Prizes function
-    Value: !GetAtt GetPrizesFunctionRole.Arn
+  ApiGateway:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Env}"
